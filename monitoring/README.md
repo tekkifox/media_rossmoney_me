@@ -22,16 +22,24 @@ docker compose -f monitoring/compose.yaml up -d
 
 The dashboard is accessible on the external `proxy` network at `172.18.0.22:8083`.
 
-### Run the Trivy scan stack
+### Run the Trivy server
 
 ```bash
 docker compose -f monitoring/trivy-compose.yaml up -d
 ```
 
-Run a full host and image sweep:
+This starts the Trivy API server and its Docker socket proxy. Scans are
+**not** a compose service — trigger the full host + image + SBOM sweep via
+cron, which execs into the running `trivy` container:
 
 ```bash
-docker compose -f monitoring/trivy-compose.yaml run --rm scan
+docker compose -f monitoring/trivy-compose.yaml exec -T trivy /trivy-cron.sh
+```
+
+Or run a single scan directly:
+
+```bash
+docker compose -f monitoring/trivy-compose.yaml exec -T trivy /scan.sh
 ```
 
 ## GitHub Actions
