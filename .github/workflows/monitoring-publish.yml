@@ -68,9 +68,12 @@ jobs:
         env:
           PORTAINER_WEBHOOK_URLS: ${{ vars.PORTAINER_WEBHOOK_URLS }}
         run: |
-          IFS=$',\n'
-          for url in ${PORTAINER_WEBHOOK_URLS}; do
-            url="$(printf '%s' "$url" | xargs)"
+          # Normalise comma and newline separators to comma-only.
+          urls="$(printf '%s' "$PORTAINER_WEBHOOK_URLS" | tr '\n' ',')"
+          IFS=,
+          for url in $urls; do
+            # Strip whitespace; xargs mangles URLs with special chars.
+            url="$(printf '%s' "$url" | tr -d '[:space:]')"
             [ -z "$url" ] && continue
             status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$url")
             case "$status" in
