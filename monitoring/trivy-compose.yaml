@@ -1,0 +1,96 @@
+services:
+  docker-api:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    pull_policy: always
+    container_name: trivy-docker-api
+    env_file:
+      - trivy.env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+    networks:
+      - trivy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -qO- http://127.0.0.1:2375/_ping | grep -q OK
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+  trivy:
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/trivy:latest
+    pull_policy: always
+    user: 1001:1001
+    command:
+      - server
+      - --listen=0.0.0.0:8080
+      - --cache-dir=/var/cache/trivy
+      - --no-progress
+      - --quiet
+    env_file:
+      - trivy.env
+    volumes:
+      - trivy-db:/var/cache/trivy
+      # Host filesystem, used for OS package and secret scanning
+      - /:/host:ro
+      - monitoring-reports:/reports
+    expose:
+      - "8080"
+    # Hard cap; honoured by Compose v2 without swarm. Keeps an on-demand API
+    # scan from saturating the host.
+    deploy:
+      resources:
+        limits:
+          cpus: ${TRIVY_CPUS:-2.0}
+          memory: ${TRIVY_MEMORY:-2G}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - trivy
+        - --version
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      docker-api:
+        condition: service_healthy
+    networks:
+      - trivy
+  scan:
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/trivy:latest
+    pull_policy: always
+    user: 1001:1001
+    env_file:
+      - trivy.env
+    volumes:
+      - trivy-db-scan:/var/cache/trivy
+      - /:/host:ro
+      - monitoring-reports:/reports
+    depends_on:
+      docker-api:
+        condition: service_healthy
+    networks:
+      - trivy
+    deploy:
+      resources:
+        limits:
+          cpus: ${TRIVY_CPUS:-2.0}
+          memory: ${TRIVY_MEMORY:-2G}
+    entrypoint: ["/scan.sh"]
+networks:
+  trivy:
+    driver: bridge
+volumes:
+  trivy-db:
+    name: rossmoney_trivy-db
+  trivy-db-scan:
+    name: rossmoney_trivy-db-scan
+  monitoring-reports:
+    external: true
+    name: rossmoney_monitoring-reports
