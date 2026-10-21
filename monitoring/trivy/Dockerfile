@@ -26,6 +26,10 @@ RUN mkdir -p /var/cache/trivy /reports && \
 COPY scan.sh /scan.sh
 RUN chmod 755 /scan.sh
 
+# Host cron execs into this container to run the on-demand sweep.
+COPY trivy-cron.sh /trivy-cron.sh
+RUN chmod 755 /trivy-cron.sh
+
 USER 1001:1001
 
 ENTRYPOINT ["trivy"]

@@ -22,16 +22,24 @@ docker compose -f monitoring/compose.yaml up -d
 
 The dashboard is accessible on the external `proxy` network at `172.18.0.22:8083`.
 
-### Run the Trivy scan stack
+### Run the Trivy server
 
 ```bash
 docker compose -f monitoring/trivy-compose.yaml up -d
 ```
 
-Run a full host and image sweep:
+This starts the Trivy API server and its Docker socket proxy. Scans are
+**not** a compose service — trigger the full host + image + SBOM sweep via
+cron, which execs into the running `trivy` container:
 
 ```bash
-docker compose -f monitoring/trivy-compose.yaml run --rm scan
+docker compose -f monitoring/trivy-compose.yaml exec -T trivy /trivy-cron.sh
+```
+
+Or run a single scan directly:
+
+```bash
+docker compose -f monitoring/trivy-compose.yaml exec -T trivy /scan.sh
 ```
 
 ## GitHub Actions
@@ -74,6 +82,10 @@ All one-shot shell logic lives in the images, not the compose files:
 - **`monitoring-dashboard`** bundles `/reports-init.sh` (chowns the report volume to 1001:1001). The `reports-init` service runs it with `entrypoint: ["/reports-init.sh"]`.
 - **`lynis-report-converter`** bundles `/entrypoint.sh` (runs the conversion). This is the image's default `ENTRYPOINT`, so the compose service needs no override.
 - **`trivy`** bundles `/scan.sh` (full host + image sweep with SBOMs). The `scan` service runs it with `entrypoint: ["/scan.sh"]`; the `trivy` server service keeps the default `ENTRYPOINT ["trivy"]`.
+- **`trivy`** also bundles `/trivy-cron.sh` — a one-shot cron script that execs into the running `trivy` container and triggers the sweep. Run it with:
+  ```
+  docker compose -f monitoring/trivy-compose.yaml exec trivy /trivy-cron.sh
+  ```
 
 ## Reports
 
