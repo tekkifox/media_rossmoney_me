@@ -1,19 +1,4 @@
 services:
-  lynis-report-converter:
-    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-lynis-report-converter:latest
-    pull_policy: always
-    user: "1001:1001"
-    env_file:
-      - monitoring.env
-    volumes:
-      - monitoring-reports:/reports
-    depends_on:
-      reports-init:
-        condition: service_completed_successfully
-    networks:
-      - monitor
-    restart: "no"
-
   reports-init:
     image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-dashboard:latest
     user: "0:0"
@@ -37,8 +22,6 @@ services:
       - /tmp:uid=1001,gid=1001,mode=1777
     depends_on:
       reports-init:
-        condition: service_completed_successfully
-      lynis-report-converter:
         condition: service_completed_successfully
     volumes:
       - monitoring-reports:/reports:ro
