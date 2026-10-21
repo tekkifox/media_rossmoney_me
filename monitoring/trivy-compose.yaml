@@ -22,7 +22,7 @@ services:
       retries: 12
       start_period: 10s
   trivy:
-    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/trivy:latest
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-trivy:latest
     pull_policy: always
     user: 1001:1001
     command:
@@ -63,7 +63,7 @@ services:
     networks:
       - trivy
   scan:
-    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/trivy:latest
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-trivy:latest
     pull_policy: always
     user: 1001:1001
     env_file:

@@ -1,16 +1,6 @@
-# Report dashboard. See monitoring/README.md.
-#
-#   docker compose -f docker-compose.monitoring.yml up -d
-#
-# Environment variables are loaded from monitoring.env (or .env in the same dir).
-# In Portainer, deploy the stack with this file alongside the compose file, or
-# paste the values into the stack's Environment variables section.
-#   docker compose --env-file monitoring.env -f docker-compose.monitoring.yml up -d
-
 services:
-  # Renders lynis-report.dat into HTML. One-shot; the host cron re-runs it daily.
   lynis-report-converter:
-    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/lynis-report-converter:latest
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-lynis-report-converter:latest
     pull_policy: always
     user: "1001:1001"
     env_file:
@@ -24,10 +14,6 @@ services:
       - monitor
     restart: "no"
 
-  # Chowns the report volume to 1001:1001. Docker creates named volumes
-  # root-owned, so this must run before the scanner writes or nginx reads.
-  # Uses the dashboard image which bundles the reports-init script; no separate
-  # alpine image needed.
   reports-init:
     image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-dashboard:latest
     user: "0:0"
@@ -39,8 +25,6 @@ services:
     command: []
     restart: "no"
 
-  # nginx runs as 1001:1001 to match the report ownership, so group-read bits
-  # suffice. Port 8083 is unprivileged; tmpfs covers the paths nginx writes to.
   dashboard:
     image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-dashboard:latest
     pull_policy: always
@@ -73,12 +57,10 @@ services:
 networks:
   monitor:
     driver: bridge
-  # Created by the reverse proxy stack, which owns the subnet.
   proxy:
     external: true
     name: proxy
 
 volumes:
-  # Created by whichever writer runs first, then chowned by reports-init.
   monitoring-reports:
     name: rossmoney_monitoring-reports
