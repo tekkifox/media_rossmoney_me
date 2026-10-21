@@ -64,9 +64,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger Portainer webhooks
-        if: ${{ secrets.PORTAINER_WEBHOOK_URLS != '' }}
+        if: ${{ env.PORTAINER_WEBHOOK_URLS != '' }}
+        env:
+          PORTAINER_WEBHOOK_URLS: ${{ secrets.PORTAINER_WEBHOOK_URLS }}
         run: |
-          IFS=',\n'
+          IFS=$',\n'
           for url in ${PORTAINER_WEBHOOK_URLS}; do
             url="$(printf '%s' "$url" | xargs)"
             [ -z "$url" ] && continue
@@ -76,5 +78,3 @@ jobs:
               *) echo "Portainer webhook failed: $url ($status)" ; exit 1 ;;
             esac
           done
-        env:
-          PORTAINER_WEBHOOK_URLS: ${{ secrets.PORTAINER_WEBHOOK_URLS }}
