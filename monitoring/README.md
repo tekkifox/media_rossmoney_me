@@ -74,6 +74,10 @@ All one-shot shell logic lives in the images, not the compose files:
 - **`monitoring-dashboard`** bundles `/reports-init.sh` (chowns the report volume to 1001:1001). The `reports-init` service runs it with `entrypoint: ["/reports-init.sh"]`.
 - **`lynis-report-converter`** bundles `/entrypoint.sh` (runs the conversion). This is the image's default `ENTRYPOINT`, so the compose service needs no override.
 - **`trivy`** bundles `/scan.sh` (full host + image sweep with SBOMs). The `scan` service runs it with `entrypoint: ["/scan.sh"]`; the `trivy` server service keeps the default `ENTRYPOINT ["trivy"]`.
+- **`trivy`** also bundles `/trivy-cron.sh` — a one-shot cron script that execs into the running `trivy` container and triggers the sweep. Run it with:
+  ```
+  docker compose -f monitoring/trivy-compose.yaml exec trivy /trivy-cron.sh
+  ```
 
 ## Reports
 
