@@ -28,7 +28,10 @@ chmod 644 "$R/lynis-report.dat" "$R/lynis.log"
 
 # 4. Run the converter container
 echo "Running lynis-report-converter..."
-/usr/bin/docker compose -f /home/ross/stacks/monitoring/compose.yaml \
-    up --no-deps --force-recreate --exit-code-from lynis-report-converter lynis-report-converter
+/usr/bin/docker run --rm \
+    --env-file /home/ross/stacks/monitoring/monitoring.env \
+    -v rossmoney_monitoring-reports:/reports \
+    ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-lynis-report-converter:latest \
+    /entrypoint.sh
 
 echo "=== Lynis Scan Completed Successfully: $(date) ==="
