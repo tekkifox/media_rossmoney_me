@@ -1,4 +1,4 @@
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 
 # The dashboard config is baked into the image rather than supplied as a Compose
 # `configs` mount. Compose materialises those as a root-owned file, which the
