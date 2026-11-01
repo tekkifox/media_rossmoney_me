@@ -18,7 +18,7 @@ REPORT_DIR="${TRIVY_SCAN_REPORT_DIR:-/reports}"
 DOCKER_API="${TRIVY_DOCKER_API:-}"
 SEVERITY="${TRIVY_SCAN_SEVERITY:-HIGH,CRITICAL}"
 IGNORE_UNFIXED="${TRIVY_SCAN_IGNORE_UNFIXED:-true}"
-SKIP_DIRS="${TRIVY_SKIP_DIRS:-/host/var/lib/docker /host/proc /host/sys /host/dev /host/run /host/mnt/media /host/mnt/hbrr/media}"
+SKIP_DIRS="${TRIVY_SKIP_DIRS:-/host/home /host/var/lib/docker /host/proc /host/sys /host/dev /host/run /host/mnt/media /host/mnt/hbrr/media}"
 IMAGES="${TRIVY_SCAN_IMAGES:-}"
 SBOM="${TRIVY_SCAN_SBOM:-true}"
 

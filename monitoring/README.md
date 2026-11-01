@@ -42,6 +42,38 @@ Or run a single scan directly:
 docker compose -f monitoring/trivy-compose.yaml exec -T trivy /scan.sh
 ```
 
+### Three ways the cron scan fails quietly
+
+If `trivy-scan.log` shows a start and a successful finish but the reports are
+stale, check these three things first.
+
+**1. `docker exec -t` under cron.** Cron has no controlling terminal, so
+`docker exec -it` exits immediately with `the input device is not a TTY`. The
+script still logs `Scan Started` and `Scan Completed Successfully` because the
+`docker exec` failure is the only thing that happened. Never pass `-t` from
+cron; `-i` is also unnecessary here because nothing is fed on stdin.
+
+**2. A second client sharing the server's cache.** The `trivy` service runs
+`trivy server`, which holds a permanent lock on `/var/cache/trivy`. A scan that
+starts its own client against that same cache dies with `Failed to acquire
+cache or database lock`. Point clients at the running server instead:
+
+```sh
+docker exec -e TRIVY_SERVER=http://127.0.0.1:8080 trivy /scan.sh
+```
+
+`TRIVY_SERVER` is passed per-exec rather than in `trivy.env`, because that env
+file is also read by the `trivy server` process itself. Keep the address in
+step with `--listen` in `monitoring/trivy-compose.yaml`.
+
+**3. The OS scan walking `/host/home`.** The host root is mounted at `/host` so
+`trivy rootfs` can inspect system packages, but `/host/home` holds container
+data: pnpm stores, restored backups, media payloads. Walking it takes many
+minutes at best and at worst aborts the OS report with `walk dir error ...
+failed to analyze file`. Keep `/host/home`, `/host/var/lib/docker`, and the
+pseudo-filesystems in `TRIVY_SKIP_DIRS`; `scan.sh` defaults to that set, and
+the cron re-asserts it with `-e` so a rebuilt image cannot regress.
+
 ## GitHub Actions
 
 The workflow at `.github/workflows/monitoring-publish.yml` builds and publishes images on push to `main` or manual dispatch. Images are tagged `latest` (default branch only) and `sha-<commit>`:
