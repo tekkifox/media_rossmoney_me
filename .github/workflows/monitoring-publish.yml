@@ -87,3 +87,63 @@ jobs:
               *) echo "Portainer webhook failed: $url ($status)" ; exit 1 ;;
             esac
           done
+
+  deploy:
+    name: Deploy ${{ matrix.stack }}
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { stack: 20, endpoint: 3, compose: deploy/monitoring.default.yml }
+          - { stack: 37, endpoint: 8, compose: deploy/monitoring.edge.yml }
+          - { stack: 29, endpoint: 9, compose: deploy/monitoring.edge.yml }
+          - { stack: 21, endpoint: 3, compose: deploy/trivy.default.yml }
+          - { stack: 38, endpoint: 8, compose: deploy/trivy.default.yml }
+          - { stack: 30, endpoint: 9, compose: deploy/trivy.photos.yml }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Redeploy stack via Portainer API
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          stack=${{ matrix.stack }}
+          endpoint=${{ matrix.endpoint }}
+          compose=${{ matrix.compose }}
+
+          # 1. Read the live stack's Env (must be preserved; empty wipes all vars).
+          get_tmp=$(mktemp)
+          get_status=$(curl -sS -o "$get_tmp" -w '%{http_code}' \
+            -H "X-API-Key: $PORTAINER_API_KEY" \
+            "$PORTAINER_URL/api/stacks/$stack")
+          if [[ ! "$get_status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "GET /api/stacks/$stack failed: HTTP $get_status"
+            cat "$get_tmp"
+            exit 1
+          fi
+          jq -c '.Env // []' "$get_tmp" > env.json
+
+          # 2. Update the stack with the new compose, preserved Env, and pull images.
+          body=$(mktemp)
+          jq -n --rawfile compose "$compose" --argjson env "$(cat env.json)" \
+            '{StackFileContent: $compose, Env: $env, PullImage: true}' > "$body"
+
+          put_tmp=$(mktemp)
+          put_status=$(curl -sS -o "$put_tmp" -w '%{http_code}' -X PUT \
+            -H "X-API-Key: $PORTAINER_API_KEY" \
+            -H "Content-Type: application/json" \
+            --data-binary @"$body" \
+            "$PORTAINER_URL/api/stacks/$stack?endpointId=$endpoint")
+          if [[ ! "$put_status" =~ ^2[0-9][0-9]$ ]]; then
+            echo "PUT /api/stacks/$stack failed: HTTP $put_status"
+            cat "$put_tmp"
+            exit 1
+          fi
+          echo "Redeployed stack $stack on endpoint $endpoint (HTTP $put_status)"

@@ -1,0 +1,50 @@
+services:
+  reports-init:
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-dashboard:latest
+    user: "0:0"
+    entrypoint: ["/reports-init.sh"]
+    env_file:
+      - stack.env
+    volumes:
+      - monitoring-reports:/reports
+    command: []
+    restart: "no"
+
+  dashboard:
+    image: ghcr.io/${IMAGE_NAMESPACE:-tekkifox}/monitoring-dashboard:latest
+    pull_policy: always
+    user: "1001:1001"
+    env_file:
+      - stack.env
+    tmpfs:
+      - /var/cache/nginx:uid=1001,gid=1001,mode=0700
+      - /var/run:uid=1001,gid=1001,mode=0755
+      - /tmp:uid=1001,gid=1001,mode=1777
+    depends_on:
+      reports-init:
+        condition: service_completed_successfully
+    volumes:
+      - monitoring-reports:/reports:ro
+    expose:
+      - "8083"
+    networks:
+      proxy:
+        aliases:
+          - monitoring-dashboard-1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8083/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  monitor:
+    driver: bridge
+  proxy:
+    external: true
+    name: proxy
+
+volumes:
+  monitoring-reports:
+    name: rossmoney_monitoring-reports
