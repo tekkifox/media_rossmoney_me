@@ -69,25 +69,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Trigger Portainer webhooks
-        if: ${{ env.PORTAINER_WEBHOOK_URLS != '' }}
-        env:
-          PORTAINER_WEBHOOK_URLS: ${{ vars.PORTAINER_WEBHOOK_URLS }}
-        run: |
-          # Normalise comma and newline separators to comma-only.
-          urls="$(printf '%s' "$PORTAINER_WEBHOOK_URLS" | tr '\n' ',')"
-          IFS=,
-          for url in $urls; do
-            # Strip whitespace; xargs mangles URLs with special chars.
-            url="$(printf '%s' "$url" | tr -d '[:space:]')"
-            [ -z "$url" ] && continue
-            status=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$url")
-            case "$status" in
-              200|202|204|409) echo "Portainer webhook OK: $url ($status)" ;;
-              *) echo "Portainer webhook failed: $url ($status)" ; exit 1 ;;
-            esac
-          done
-
   deploy:
     name: Deploy ${{ matrix.stack }}
     runs-on: [self-hosted, paseo]
@@ -97,53 +78,108 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { stack: 20, endpoint: 3, compose: deploy/monitoring.default.yml }
-          - { stack: 37, endpoint: 8, compose: deploy/monitoring.edge.yml }
-          - { stack: 29, endpoint: 9, compose: deploy/monitoring.edge.yml }
-          - { stack: 21, endpoint: 3, compose: deploy/trivy.default.yml }
-          - { stack: 38, endpoint: 8, compose: deploy/trivy.default.yml }
-          - { stack: 30, endpoint: 9, compose: deploy/trivy.photos.yml }
+          - { stack: monitoring, compose: deploy/monitoring.default.yml }
+          - { stack: storage-monitoring, compose: deploy/monitoring.edge.yml }
+          - { stack: photos-monitoring, compose: deploy/monitoring.edge.yml }
+          - { stack: trivy, compose: deploy/trivy.default.yml }
+          - { stack: storage-trivy, compose: deploy/trivy.default.yml }
+          - { stack: photos-trivy, compose: deploy/trivy.photos.yml }
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
       - name: Redeploy stack via Portainer API
+        shell: bash
         env:
           PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
           PORTAINER_API_KEY: ${{ secrets.PORTAINER_API_KEY }}
+          STACK_NAME: ${{ matrix.stack }}
+          COMPOSE_FILE: ${{ matrix.compose }}
         run: |
           set -euo pipefail
 
-          stack=${{ matrix.stack }}
-          endpoint=${{ matrix.endpoint }}
-          compose=${{ matrix.compose }}
+          PORTAINER_URL="${PORTAINER_URL%/}"
 
-          # 1. Read the live stack's Env (must be preserved; empty wipes all vars).
-          get_tmp=$(mktemp)
-          get_status=$(curl -sS -o "$get_tmp" -w '%{http_code}' \
-            -H "X-API-Key: $PORTAINER_API_KEY" \
-            "$PORTAINER_URL/api/stacks/$stack")
-          if [[ ! "$get_status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "GET /api/stacks/$stack failed: HTTP $get_status"
-            cat "$get_tmp"
+          # 1. Find the stack by exact name (never hardcode Id/EndpointId).
+          stacks_response=$(curl -sS -w "\n%{http_code}" \
+            -H "X-API-Key: ${PORTAINER_API_KEY}" \
+            "${PORTAINER_URL}/api/stacks")
+          stacks_status=$(printf '%s\n' "$stacks_response" | tail -n 1)
+          stacks_body=$(printf '%s\n' "$stacks_response" | sed '$d')
+
+          if [ "$stacks_status" -lt 200 ] || [ "$stacks_status" -ge 300 ]; then
+            echo "Portainer GET /api/stacks failed with HTTP status ${stacks_status}"
+            printf '%s\n' "$stacks_body"
             exit 1
           fi
-          jq -c '.Env // []' "$get_tmp" > env.json
+          if ! printf '%s\n' "$stacks_body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+            echo "Portainer GET /api/stacks did not return a JSON array"
+            printf '%s\n' "$stacks_body"
+            exit 1
+          fi
 
-          # 2. Update the stack with the new compose, preserved Env, and pull images.
-          body=$(mktemp)
-          jq -n --rawfile compose "$compose" --argjson env "$(cat env.json)" \
-            '{StackFileContent: $compose, Env: $env, PullImage: true}' > "$body"
+          matches=$(printf '%s\n' "$stacks_body" | jq -c --arg name "$STACK_NAME" '[.[] | select(.Name == $name)]')
+          match_count=$(printf '%s\n' "$matches" | jq 'length')
 
-          put_tmp=$(mktemp)
-          put_status=$(curl -sS -o "$put_tmp" -w '%{http_code}' -X PUT \
-            -H "X-API-Key: $PORTAINER_API_KEY" \
+          if [ "$match_count" -eq 0 ]; then
+            echo "Portainer stack named '${STACK_NAME}' not found in /api/stacks"
+            printf '%s\n' "$stacks_body"
+            exit 1
+          fi
+          if [ "$match_count" -gt 1 ]; then
+            echo "Portainer has ${match_count} stacks named '${STACK_NAME}'; refusing to guess. needs-decision:"
+            printf '%s\n' "$matches" | jq -r '.[] | "  Id=\(.Id) EndpointId=\(.EndpointId) Name=\(.Name)"'
+            exit 1
+          fi
+
+          stack_id=$(printf '%s\n' "$matches" | jq -r '.[0].Id // empty')
+          endpoint_id=$(printf '%s\n' "$matches" | jq -r '.[0].EndpointId // empty')
+          if [ -z "$stack_id" ] || [ "$stack_id" = "null" ]; then
+            echo "Portainer stack '${STACK_NAME}' has no Id"
+            printf '%s\n' "$matches"
+            exit 1
+          fi
+          if [ -z "$endpoint_id" ] || [ "$endpoint_id" = "null" ]; then
+            echo "Portainer stack '${STACK_NAME}' has no EndpointId"
+            printf '%s\n' "$matches"
+            exit 1
+          fi
+
+          echo "Found stack '${STACK_NAME}': Id=${stack_id}, EndpointId=${endpoint_id}"
+
+          # 2. Read the live stack's Env (must be preserved; empty wipes all vars).
+          get_response=$(curl -sS -w "\n%{http_code}" \
+            -H "X-API-Key: ${PORTAINER_API_KEY}" \
+            "${PORTAINER_URL}/api/stacks/${stack_id}")
+          get_status=$(printf '%s\n' "$get_response" | tail -n 1)
+          get_body=$(printf '%s\n' "$get_response" | sed '$d')
+
+          if [ "$get_status" -lt 200 ] || [ "$get_status" -ge 300 ]; then
+            echo "Portainer GET /api/stacks/${stack_id} failed with HTTP status ${get_status}"
+            printf '%s\n' "$get_body"
+            exit 1
+          fi
+
+          env_array=$(printf '%s\n' "$get_body" | jq -c '.Env // []')
+
+          # 3. Update the stack with the new compose, preserved Env, and pull images.
+          body=$(jq -n \
+            --rawfile compose "$COMPOSE_FILE" \
+            --argjson env "$env_array" \
+            '{StackFileContent: $compose, Env: $env, PullImage: true}')
+
+          put_response=$(curl -sS -w "\n%{http_code}" \
+            -X PUT "${PORTAINER_URL}/api/stacks/${stack_id}?endpointId=${endpoint_id}" \
+            -H "X-API-Key: ${PORTAINER_API_KEY}" \
             -H "Content-Type: application/json" \
-            --data-binary @"$body" \
-            "$PORTAINER_URL/api/stacks/$stack?endpointId=$endpoint")
-          if [[ ! "$put_status" =~ ^2[0-9][0-9]$ ]]; then
-            echo "PUT /api/stacks/$stack failed: HTTP $put_status"
-            cat "$put_tmp"
+            --data-binary "$body")
+          put_status=$(printf '%s\n' "$put_response" | tail -n 1)
+          put_body=$(printf '%s\n' "$put_response" | sed '$d')
+
+          if [ "$put_status" -lt 200 ] || [ "$put_status" -ge 300 ]; then
+            echo "Portainer PUT /api/stacks/${stack_id} failed with HTTP status ${put_status}"
+            printf '%s\n' "$put_body"
             exit 1
           fi
-          echo "Redeployed stack $stack on endpoint $endpoint (HTTP $put_status)"
+
+          echo "Redeployed stack '${STACK_NAME}' (Id=${stack_id}) on endpoint ${endpoint_id} (HTTP ${put_status})"
