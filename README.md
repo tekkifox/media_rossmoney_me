@@ -1,6 +1,6 @@
-# Media Ross Money
+#  Monitoring
 
-This repository contains the monitoring stack for the Ross Money project.
+This repository contains the monitoring stacks for the Ross Money project.
 
 ## Monitoring
 
