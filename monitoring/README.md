@@ -86,9 +86,10 @@ The workflow at `.github/workflows/monitoring-publish.yml` builds and publishes 
 
 ### Portainer deploy
 
-After the images are pushed, the workflow triggers Portainer webhook(s) so the running stack(s) redeploy with the new images. This is generic and can target more than one server:
+After the images are pushed, the workflow redeploys each running stack through the Portainer API so it pulls the new images. Configure the `PORTAINER_URL` and `PORTAINER_API_KEY` secrets for the Portainer hub.
 
-- Configure the `PORTAINER_WEBHOOK_URLS` secret with one or more webhook URLs (comma- or newline-separated), one per Portainer stack instance. The step fires each webhook in turn and only fails the run if a hook returns a non-success status. The step is skipped entirely when the secret is unset, so the build still succeeds without it.
+- Each target stack is discovered by its exact name from `GET /api/stacks`; `Id` and `EndpointId` are never hardcoded. The deploy step fails if a name is missing or matches more than one stack.
+- The step reads the live stack's `Env`, then sends `PUT /api/stacks/{id}?endpointId={endpointId}` with the repository compose file, the preserved `Env`, and `PullImage: true`. Any non-2xx response fails the job and prints the response body.
 
 ### Multi-server / generic install
 
